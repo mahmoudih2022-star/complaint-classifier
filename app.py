@@ -25,7 +25,7 @@ CATEGORIES = [
 ]
 
 HF_TOKEN = os.environ.get("HF_TOKEN", st.secrets.get("HF_TOKEN", ""))
-MODEL    = "facebook/bart-large-mnli"
+MODEL    = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"  # يدعم العربية ✅
 
 
 # ============================================================
