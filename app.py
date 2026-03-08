@@ -1,11 +1,11 @@
 """
-app.py - Complaint Classifier على Streamlit Cloud
+app.py - Complaint Classifier باستخدام Claude API
 """
 
 import os
+import json
 import streamlit as st
 import requests
-import json
 
 # ============================================================
 # فئات الشكاوى
@@ -24,41 +24,46 @@ CATEGORIES = [
     "أخرى",
 ]
 
-HF_TOKEN = os.environ.get("HF_TOKEN", st.secrets.get("HF_TOKEN", ""))
-MODEL    = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"  # يدعم العربية ✅
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY", "") or st.secrets.get("ANTHROPIC_KEY", "")
 
 
 # ============================================================
-# دالة التصنيف
+# دالة التصنيف باستخدام Claude API
 # ============================================================
 def classify(text: str) -> dict:
-    url     = f"https://api-inference.huggingface.co/models/{MODEL}"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    payload = {
-        "inputs": text,
-        "parameters": {"candidate_labels": CATEGORIES},
-    }
-    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    categories_str = "\n".join([f"{i}. {c}" for i, c in enumerate(CATEGORIES)])
+
+    prompt = f"""صنّف الشكوى التالية في إحدى الفئات المذكورة.
+أجب فقط بـ JSON بالشكل ده بدون أي كلام تاني:
+{{"category": "اسم الفئة", "confidence": 0.95, "top3": [{{"category": "فئة1", "confidence": 0.95}}, {{"category": "فئة2", "confidence": 0.03}}, {{"category": "فئة3", "confidence": 0.02}}]}}
+
+الفئات المتاحة:
+{categories_str}
+
+الشكوى: {text}"""
+
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 300,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=30,
+    )
     resp.raise_for_status()
-    data = resp.json()
-
-    labels = data.get("labels", [])
-    scores = data.get("scores", [])
-
-    top3 = [
-        {"category": labels[i], "confidence": round(scores[i], 4)}
-        for i in range(min(3, len(labels)))
-    ]
-
-    return {
-        "category":   labels[0] if labels else "أخرى",
-        "confidence": round(scores[0], 4) if scores else 0.0,
-        "top3":       top3,
-    }
+    content = resp.json()["content"][0]["text"].strip()
+    content = content.replace("```json", "").replace("```", "").strip()
+    return json.loads(content)
 
 
 # ============================================================
-# Streamlit UI + REST endpoint
+# Streamlit UI
 # ============================================================
 st.set_page_config(page_title="تصنيف الشكاوى", page_icon="🤖", layout="centered")
 
@@ -73,7 +78,7 @@ if "text" in query_params:
         st.json({"error": str(e)})
     st.stop()
 
-# --- UI mode: واجهة اختبار ---
+# --- UI mode ---
 st.title("🤖 تصنيف شكاوى المواطنين")
 st.markdown("اكتب الشكوى وهيصنفها الذكاء الاصطناعي تلقائياً")
 
@@ -82,8 +87,8 @@ text = st.text_area("نص الشكوى:", placeholder="مثال: الطريق أ
 if st.button("صنّف الشكوى 🔍", use_container_width=True):
     if not text.strip():
         st.warning("من فضلك اكتب نص الشكوى")
-    elif not HF_TOKEN:
-        st.error("مفيش HF_TOKEN — أضفه في secrets")
+    elif not ANTHROPIC_KEY:
+        st.error("مفيش ANTHROPIC_KEY — أضفه في Secrets")
     else:
         with st.spinner("جاري التصنيف..."):
             try:
